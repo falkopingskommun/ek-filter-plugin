@@ -12,7 +12,7 @@ module.exports = merge(common, {
     hints: false
   },
   output: {
-    path: `${__dirname}/../../build/js`,
+    path: `${__dirname}/../build/js`,
     filename: 'origofilteretuna.min.js',
     libraryTarget: 'var',
     libraryExport: 'default',

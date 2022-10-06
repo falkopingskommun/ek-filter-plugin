@@ -1,5 +1,6 @@
 import Origo from 'Origo';
 import isOverlapping from './utils/overlapping';
+import FtlMapper from './utils/ftl-mapper';
 
 const Origofilteretuna = function Origofilteretuna(options = {}) {
   let viewer;
@@ -59,6 +60,7 @@ const Origofilteretuna = function Origofilteretuna(options = {}) {
   let attributesWithSpecialChars;
   let breakingWidth = 0;
   let mode = 'simple';
+  let ftlMapper;
   const name = 'origofilteretuna';
   const dom = Origo.ui.dom;
   const layerTypes = ['WMS', 'WFS'];
@@ -75,6 +77,7 @@ const Origofilteretuna = function Origofilteretuna(options = {}) {
   const warningBackgroundColor = Object.prototype.hasOwnProperty.call(options, 'warningBackgroundColor') ? options.warningBackgroundColor : '#fff700';
   const warningTextColor = Object.prototype.hasOwnProperty.call(options, 'warningTextColor') ? options.warningTextColor : '#000000';
   const warningText = Object.prototype.hasOwnProperty.call(options, 'warningText') ? options.warningText : 'OBS!';
+  const geoserverUrl = Object.prototype.hasOwnProperty.call(options, 'geoserverUrl') ? options.geoserverUrl : undefined;
 
   function handleOverlapping() {
     if (document.getElementsByClassName('o-search').length > 0) {
@@ -190,18 +193,51 @@ const Origofilteretuna = function Origofilteretuna(options = {}) {
     return response;
   }
 
+  async function getFeatureProps(layer) {
+    try {
+      const sourceUrl = getSourceUrl(layer);
+      const url = [
+        `${sourceUrl}`,
+        'wfs?version=1.3.0&request=describeFeatureType&outputFormat=application/json&service=WFS',
+        `&typeName=${layer.get('name')}`
+      ].join('');
+
+      const res = await fetch(url);
+      return await res.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
   async function getProperties(layer) {
-    const sourceUrl = getSourceUrl(layer);
-    const url = [
-      `${sourceUrl}`,
-      'wfs?version=1.3.0&request=describeFeatureType&outputFormat=application/json&service=WFS',
-      `&typeName=${layer.get('name')}`
-    ].join('');
+    let ftlProps = [];
+    if (ftlMapper) {
+      const mappedContent = await ftlMapper.getFtlMap(layer);
+      if (mappedContent && mappedContent.length > 0) {
+        ftlProps = mappedContent;
+      }
+    }
 
-    const response = await fetch(url)
-      .then(res => res.json());
+    const response = await getFeatureProps(layer);
+    if (!response) return ftlProps;
 
-    return response.featureTypes[0].properties.filter(prop => !excludedAttributes.includes(prop.name));
+    const featureProps = response.featureTypes[0].properties;
+    const newProps = [];
+    featureProps.forEach((prop) => {
+      const obj = prop;
+      if (ftlProps.length > 0) {
+        const matchingProp = ftlProps.find(f => f.name === obj.name);
+        if (matchingProp) {
+          obj.ftlValue = matchingProp.ftlValue;
+          ftlProps = ftlProps.filter(f => f.name !== matchingProp.name);
+        }
+      }
+      newProps.push(obj);
+    });
+    if (ftlProps.length > 0) {
+      newProps.push(...ftlProps);
+    }
+    return newProps.filter(prop => !excludedAttributes.includes(prop.name));
   }
 
   async function addAttributeRow(attribute, operator, value, firstRow) {
@@ -288,7 +324,8 @@ const Origofilteretuna = function Origofilteretuna(options = {}) {
       node.classList = 'rounded border text-smaller padding-small margin-top-small relative o-tooltip';
       node.innerHTML = `<p style="overflow-wrap: break-word; width: 18rem"><span class="text-weight-bold">Lager: </span>${filter.title}</p><p style="overflow-wrap: break-word;"><span class="text-weight-bold">Filter: </span>${filter.cqlFilter}</p>${myFilterRemoveButton.render()}${myFilterEditButton.render()}${myFilterDisplayButton.render()}`;
 
-      if (!viewer.getLayer(filter.layerName).get('visible')) {
+      const layer = viewer.getLayer(filter.layerName);
+      if (!layer || !layer.get('visible')) {
         node.querySelector('.edit-filter').classList.add('disabled');
         node.querySelector('.display-filter').classList.remove('o-hidden');
       } else {
@@ -471,7 +508,7 @@ const Origofilteretuna = function Origofilteretuna(options = {}) {
       properties.forEach((property) => {
         const attribute = property.name;
         const opt = document.createElement('option');
-        opt.text = attribute;
+        opt.text = property.ftlValue ? property.ftlValue : attribute;
         opt.value = attribute;
 
         if (checkSpecialCharacters(attribute) || attribute.includes(' ')) {
@@ -484,36 +521,42 @@ const Origofilteretuna = function Origofilteretuna(options = {}) {
     });
   }
 
-  async function selectListnener(evt) {
-    if (evt.target.value !== '') {
-      selectedLayer = viewer.getLayer(evt.target.value);
-      properties = await getProperties(selectedLayer);
-
-      initAttributesWithProperties(properties);
-      removeAttributeRows();
-
-      const currentFilter = getCqlFilterFromLayer(selectedLayer);
-      document.getElementById(cqlStringTextarea.getId()).value = currentFilter;
-
-      if (currentFilter !== '') {
-        setAttributeRowsToFilter(currentFilter);
-      } else {
-        document.getElementById(logicSelect.getId()).selectedIndex = 0;
-        const firstAttributeRow = document.getElementsByClassName('attributeRow')[0];
-        firstAttributeRow.querySelector('input').value = '';
-        firstAttributeRow.querySelector(`#${operatorSelect.getId()}`).value = operators[0];
-      }
-
-      if (attributesWithSpecialChars) {
-        document.getElementById(attributeWarningDiv.getId()).classList.remove('o-hidden');
-      } else {
-        document.getElementById(attributeWarningDiv.getId()).classList.add('o-hidden');
-      }
-
-      document.getElementById(filterContentDiv.getId()).classList.remove('o-hidden');
-    } else {
+  async function selectListener(evt) {
+    if (evt.target.value === '') {
       document.getElementById(filterContentDiv.getId()).classList.add('o-hidden');
+      return;
     }
+
+    selectedLayer = viewer.getLayer(evt.target.value);
+    properties = await getProperties(selectedLayer);
+
+    if (properties.length <= 0) {
+      document.getElementById(filterContentDiv.getId()).classList.add('o-hidden');
+      return;
+    }
+
+    initAttributesWithProperties();
+    removeAttributeRows();
+
+    const currentFilter = getCqlFilterFromLayer(selectedLayer);
+    document.getElementById(cqlStringTextarea.getId()).value = currentFilter;
+
+    if (currentFilter !== '') {
+      setAttributeRowsToFilter(currentFilter);
+    } else {
+      document.getElementById(logicSelect.getId()).selectedIndex = 0;
+      const firstAttributeRow = document.getElementsByClassName('attributeRow')[0];
+      firstAttributeRow.querySelector('input').value = '';
+      firstAttributeRow.querySelector(`#${operatorSelect.getId()}`).value = operators[0];
+    }
+
+    if (attributesWithSpecialChars) {
+      document.getElementById(attributeWarningDiv.getId()).classList.remove('o-hidden');
+    } else {
+      document.getElementById(attributeWarningDiv.getId()).classList.add('o-hidden');
+    }
+
+    document.getElementById(filterContentDiv.getId()).classList.remove('o-hidden');
   }
 
   function renderLayerSelect() {
@@ -542,7 +585,7 @@ const Origofilteretuna = function Origofilteretuna(options = {}) {
     addOperators();
     selectedLayer = viewer.getLayer(select.value);
     if (!addedListener) {
-      select.addEventListener('change', async evt => selectListnener(evt));
+      select.addEventListener('change', async evt => selectListener(evt));
       addedListener = true;
     }
   }
@@ -670,7 +713,7 @@ const Origofilteretuna = function Origofilteretuna(options = {}) {
     removeAttributeRows();
     if (layers.length > 0 && selectedLayer) {
       properties = await getProperties(selectedLayer);
-      initAttributesWithProperties(properties);
+      initAttributesWithProperties();
 
       const filter = getCqlFilterFromLayer(selectedLayer);
       if (filter !== '') {
@@ -1108,6 +1151,10 @@ const Origofilteretuna = function Origofilteretuna(options = {}) {
       this.addComponents([filterButton]);
       this.render();
 
+      if (geoserverUrl) {
+        ftlMapper = FtlMapper({ geoserverUrl });
+      }
+
       renderLayerSelect();
       addListenerToLayers();
 
@@ -1116,9 +1163,13 @@ const Origofilteretuna = function Origofilteretuna(options = {}) {
         addListenerToLayers();
       });
 
-      viewer.getMap().getLayers().on('remove', async () => {
+      viewer.getMap().getLayers().on('remove', async (event) => {
         await handleLayerChanges();
         addListenerToLayers();
+        const layer = event.element;
+        if (!layer) return;
+        removeFromJson(layer.get('name'));
+        setNumberOfLayersWithFilter();
       });
 
       if (actLikeRadioButton) {

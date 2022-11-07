@@ -10,6 +10,7 @@ För filtrering på WFS från Geoserver krävs att lagret eller dess source har 
 ```
 
 **Parametrar:**
+- hideButtonWhenEmbedded: Huruvida filterknappen (och antal-aktiva-filter-indikatorn) inte ska visas i en inbäddad karta. Påverkar inte funktionaliteten om den inbäddade kartan använder en mapState som innehåller filter. Default är falsk. **Valfri**
 - excludedAttributes: Egenskaper/attribut som inte ska listas i gränssnittet. **Valfri**.
 - excludedLayers: Lager som inte ska listas i gränssnittet. Baseras på lagrets namn. **Valfri**.
 - optionBackgroundColor: Bakgrundsfärg på filterade lager i lagerlistan. **Valfri**.
@@ -22,6 +23,7 @@ För filtrering på WFS från Geoserver krävs att lagret eller dess source har 
 - warningBackgroundColor: Bakgrundsfärg för attribut-varningen. **Valfri**.
 - warningTextColor: Färg på texten för attribut-varningen. **Valfri**.
 - warningText: Text som ska visas i attribut-varningen. **Valfri**.
+- geoserverUrl: URL till Geoservers . Ex. https://localhost/geoserver. Denna måste vara angiven för att kunna hämta och mappa FTL till attribut. Både /geoserver/rest/layers och /geoserver/rest/workspaces måste vara tillgängligt för GET-anrop. **Valfri**.
 
 **Material icons som används:**
 - ic_delete_24px
@@ -45,6 +47,7 @@ SVG för ic_filter_24px
     var origo = Origo('index.json');
     origo.on('load', function (viewer) {
       var origofilteretuna = Origofilteretuna({
+        hideButtonWhenEmbedded: true,
         excludedAttributes: ['geom', 'sokid'],
         excludedLayers: ['sokvyx_djupdata_djuppunkter_vy'],
         optionBackgroundColor: '#e1f2fe',
@@ -56,7 +59,8 @@ SVG för ic_filter_24px
         warningTooltipText: 'Attribut med Å, Ä, Ö eller mellanslag kan inte användas för filtrering',
         warningBackgroundColor: '#fff700',
         warningTextColor: '#000000',
-        warningText: 'OBS!'
+        warningText: 'OBS!',
+        geoserverUrl: 'https://karta.eskilstuna.se/geoserver'
       });
       viewer.addComponent(origofilteretuna);
     });
